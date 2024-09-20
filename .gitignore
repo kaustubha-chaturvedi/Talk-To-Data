@@ -1,4 +1,4 @@
 .env
 __pycache__
 sql_tune
-chinook.db
+*.db
