@@ -1,9 +1,18 @@
 import sqlite3
+import pandas as pd
 from langchain_community.utilities.sql_database import SQLDatabase
 
-def load_db(db_uri):
-    db = SQLDatabase.from_uri(db_uri)
+def load_db(data_uri):
+    # Load MySQL database from data URI
+    db = SQLDatabase.from_uri(data_uri)
     return db
+
+def load_csv(file_path):
+    # Load CSV data into a pandas DataFrame and simulate it as a SQL table
+    df = pd.read_csv(file_path)
+    df.columns = df.columns.str.replace(r"[^a-zA-Z0-9_]", "", regex=True)
+    context = pd.io.sql.get_schema(df.reset_index(), "df").replace('"', "")
+    return df, context
 
 def load_store():
     conn = sqlite3.connect("queries.db")

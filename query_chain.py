@@ -1,6 +1,8 @@
-import re,os
+import re
+import os
+from pandasql import sqldf
 from langchain_groq import ChatGroq
-from langchain.prompts import PromptTemplate
+from langchain.prompts import ChatPromptTemplate
 from langchain.chains import create_sql_query_chain
 from langchain_core.output_parsers import StrOutputParser
 
@@ -12,6 +14,24 @@ def chain_create(db):
     chain = create_sql_query_chain(llm, db)
     return chain
 
+def csv_prompt():
+    # Use LLM to convert natural language to pandas query
+    template = """You are a powerful text-to-SQL model. Your job is to answer questions about a database. You are given a question and context regarding one or more tables. Dont add \n characters.
+        Do not include "SELECT short\_name, long\_name" this type of queries which have backslash in them.
+        You must output the SQL query that answers the question in a single line.
+
+        ### Input:
+        `{question}`
+
+        ### Context:
+        `{context}`
+
+        ### Response:
+        """
+
+    prompt = ChatPromptTemplate.from_template(template)
+    return prompt
+
 def clean_sql_query(sql_query):
     sql_query = sql_query.replace("\\_", "_").replace("\\\"", "\"")
     
@@ -22,29 +42,39 @@ def clean_sql_query(sql_query):
     sql_query = sql_query.replace("OR DER BY", "ORDER BY")
     return sql_query
 
-def sql_infer(db, chain, user_question):
-    print(MODEL)
-    sql_query = chain.invoke({"question": user_question})
+def infer(db, user_question, is_csv=False):
 
-    cleaned_query = clean_sql_query(sql_query)
+    if is_csv:
+        # Load the CSV file
+        df, context = db
+        prompt = csv_prompt()
+        llm = ChatGroq(model=MODEL, api_key=GROQ_API_KEY)
+        chain = prompt | llm
+        response = chain.invoke({"question": user_question, "context": context}).content
+        final = response.replace("`", "").replace("sql", "").strip()
+        print(response, final)
+        result = sqldf(final, locals())
 
-    try:
-        result = db.run(cleaned_query)
-    except Exception as e:
-        print(f"Error running the query: {cleaned_query}")
-        raise e
+        return {
+            "text": f"Query Results: {result.to_dict()}",
+            "sql_query": final,
+            "result": result.to_dict()
+        }
 
-    answer_prompt = PromptTemplate.from_template(
-        """Given the following user question, corresponding SQL query, and SQL result, generate a proper reply to give to user.
+    else:
+        # Handle SQL database
+        chain = chain_create(db)
+        sql_query = chain.invoke({"question": user_question})
+        cleaned_query = clean_sql_query(sql_query)
 
-        Question: {question}
-        SQL Query: {query}
-        SQL Result: {result}
-        Answer: """
-    )
+        try:
+            result = db.run(cleaned_query)
+        except Exception as e:
+            print(f"Error running the SQL query: {cleaned_query}")
+            raise e
 
-    llm_model = ChatGroq(model=MODEL, api_key=GROQ_API_KEY)
-    chain = answer_prompt | llm_model | StrOutputParser()
-    ans = chain.invoke({"question": user_question, "query": cleaned_query, "result": result})
-    return {"text": ans, "sql_query": cleaned_query, "result": result}
-
+        return {
+            "text": f"Query Results: {result}",
+            "sql_query": cleaned_query,
+            "result": result
+        }

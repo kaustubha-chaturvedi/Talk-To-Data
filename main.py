@@ -1,17 +1,23 @@
 from fastapi import FastAPI, HTTPException, Form
-from db_utils import load_db, get_query_history, store_query
-from query_chain import chain_create, sql_infer
+from db_utils import load_db, load_csv, get_query_history, store_query
+from query_chain import infer
 
 app = FastAPI()
 
 @app.post("/query")
-def run_query(db_uri: str = Form(...), question: str = Form(...)):
+def run_query(data_uri: str = Form(...), question: str = Form(...)):
     try:
-        db = load_db(db_uri)
-        chain = chain_create(db)
-        answer = sql_infer(db, chain, question)
+        # Infer data type from the data_uri (e.g., if it ends with '.csv', treat as CSV)
+        if data_uri.endswith('.csv'):
+            db = load_csv(data_uri)  # Load CSV data
+        else:
+            db = load_db(data_uri)   # Load SQL database
+
+        answer = infer(db, question, is_csv=data_uri.endswith('.csv'))
+        
         store_query(question, answer["sql_query"], str(answer["result"]))
         return {"answer": answer["text"]}
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
